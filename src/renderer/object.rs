@@ -41,13 +41,43 @@ impl TransformUniform {
     }
 }
 
+pub struct Transform {
+    pub position: Vector3<f32>,
+    pub rotation: Quaternion<f32>,
+    pub scale: Vector3<f32>,
+    pub uniform: TransformUniform,
+}
+
+#[allow(dead_code)]
+impl Transform {
+    pub fn default() -> Self {
+        Self {
+            position: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::from_axis_angle(Vector3::unit_z(), Deg(0.0)),
+            scale: Vector3::new(1.0, 1.0, 1.0),
+            uniform: TransformUniform::new(),
+        }
+    }
+
+    pub fn new() -> Self {
+        Self {
+            position: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::from_axis_angle(Vector3::unit_z(), Deg(0.0)),
+            scale: Vector3::new(1.0, 1.0, 1.0),
+            uniform: TransformUniform::new(),
+        }
+    }
+
+    pub fn update_uniform(&mut self) {
+        self.uniform
+            .calculate(self.position, self.rotation, self.scale);
+    }
+}
+
 #[allow(dead_code)]
 pub struct Object {
     model: Model,
-    position: Vector3<f32>,
-    rotation: Quaternion<f32>,
-    scale: Vector3<f32>,
-    transform_uniform: TransformUniform,
+    transform: Transform,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -55,18 +85,13 @@ pub struct Object {
 impl Object {
     pub fn new(
         model: Model,
-        position: Vector3<f32>,
-        rotation: Quaternion<f32>,
-        scale: Vector3<f32>,
+        transform: Transform,
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        let mut transform_uniform = TransformUniform::new();
-        transform_uniform.calculate(position, rotation, scale);
-
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Object Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[transform_uniform]),
+            contents: bytemuck::cast_slice(&[transform.uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -81,10 +106,7 @@ impl Object {
 
         Self {
             model,
-            position,
-            rotation,
-            scale,
-            transform_uniform,
+            transform,
             uniform_buffer,
             bind_group,
         }
@@ -102,22 +124,18 @@ impl Object {
 
         Self::new(
             model,
-            Vector3::new(0.0, 0.0, 0.0),
-            Quaternion::from_axis_angle(Vector3::unit_z(), Deg(0.0)),
-            Vector3::new(1.0, 1.0, 1.0),
+            Transform::default(),
             &context.device,
             &bind_group_layout,
         )
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
-        self.transform_uniform
-            .calculate(self.position, self.rotation, self.scale);
-
+        self.transform.update_uniform();
         queue.write_buffer(
             &self.uniform_buffer,
             0,
-            bytemuck::cast_slice(&[self.transform_uniform]),
+            bytemuck::cast_slice(&[self.transform.uniform]),
         );
     }
 }
@@ -232,7 +250,7 @@ impl<'a> ObjectManager {
             &bind_group_layout,
         )
         .await;
-        grid.scale = Vector3::new(100.0, 100.0, 100.0);
+        grid.transform.scale = Vector3::new(100.0, 100.0, 100.0);
         grid.model.data[0].material_id = 1;
 
         Self {
