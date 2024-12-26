@@ -114,6 +114,7 @@ impl CameraEye {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    inv_view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
@@ -121,12 +122,14 @@ impl CameraUniform {
         use SquareMatrix;
         Self {
             view_proj: Matrix4::identity().into(),
+            inv_view_proj: Matrix4::identity().into(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &CameraEye) {
         let proj = camera.build_view_projection_matrix();
         self.view_proj = proj.into();
+        self.inv_view_proj = proj.invert().unwrap().into();
     }
 }
 
