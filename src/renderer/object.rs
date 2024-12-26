@@ -16,12 +16,14 @@ use super::{
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TransformUniform {
     matrix: [[f32; 4]; 4],
+    inverse_matrix: [[f32; 4]; 4],
 }
 
 impl TransformUniform {
     pub fn new() -> Self {
         Self {
             matrix: Matrix4::identity().into(),
+            inverse_matrix: Matrix4::identity().into(),
         }
     }
 
@@ -31,10 +33,11 @@ impl TransformUniform {
         rotation: Quaternion<f32>,
         scale: Vector3<f32>,
     ) {
-        self.matrix = (Matrix4::from_translation(position)
+        let matrix = Matrix4::from_translation(position)
             * Matrix4::from(rotation)
-            * Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z))
-        .into();
+            * Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z);
+        self.matrix = matrix.into();
+        self.inverse_matrix = matrix.invert().unwrap().into();
     }
 }
 
