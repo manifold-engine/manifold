@@ -6,7 +6,7 @@ use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use log::{debug, info, warn};
+use log::{debug, warn};
 use winit::window::CursorIcon;
 
 pub trait EventHandler {
@@ -55,11 +55,6 @@ impl EventHandler for ManifoldApp {
 
     fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: KeyEvent) {
         match key_event.physical_key {
-            PhysicalKey::Code(KeyCode::Space) => {
-                if key_event.state == ElementState::Pressed {
-                    info!("Space!");
-                }
-            }
             PhysicalKey::Code(KeyCode::Escape) => {
                 if key_event.state == ElementState::Pressed {
                     warn!("Escape pressed, exiting the application.");
@@ -86,6 +81,12 @@ impl EventHandler for ManifoldApp {
                     .as_mut()
                     .unwrap()
                     .handle_camera_movement(key_event);
+            }
+            PhysicalKey::Code(KeyCode::KeyJ) | PhysicalKey::Code(KeyCode::KeyK) => {
+                self.renderer
+                    .as_mut()
+                    .unwrap()
+                    .handle_slice_movement(key_event);
             }
             _ => (),
         }

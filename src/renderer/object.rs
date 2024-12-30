@@ -1,16 +1,17 @@
-use std::path::PathBuf;
-
-use cgmath::{Deg, Matrix4, Quaternion, Rotation3, SquareMatrix, Vector3};
-use wgpu::util::DeviceExt;
-
 use super::{
     context::Context,
+    hypershape::{Hypershape, HypershapeDescriptor},
     material::MaterialStore,
     model::{load_model, Mesh, Model},
     pipeline::PipelineStore,
     shader::ShaderType,
     texture::TextureStore,
 };
+
+use cgmath::{Deg, Matrix4, Quaternion, Rotation3, SquareMatrix, Vector3};
+use wgpu::util::DeviceExt;
+
+use std::path::PathBuf;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -74,17 +75,22 @@ impl Transform {
     }
 }
 
+pub enum ObjectData {
+    Model(Model),
+    Hyper(Hypershape),
+}
+
 #[allow(dead_code)]
 pub struct Object {
-    model: Model,
-    transform: Transform,
+    data: ObjectData,
+    pub transform: Transform,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
 impl Object {
     pub fn new(
-        model: Model,
+        data: ObjectData,
         transform: Transform,
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -105,7 +111,7 @@ impl Object {
         });
 
         Self {
-            model,
+            data,
             transform,
             uniform_buffer,
             bind_group,
@@ -123,10 +129,24 @@ impl Object {
             .unwrap();
 
         Self::new(
-            model,
+            ObjectData::Model(model),
             Transform::default(),
             &context.device,
             &bind_group_layout,
+        )
+    }
+
+    pub fn from_hyper(
+        descriptor: &HypershapeDescriptor,
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let hypershape = Hypershape::new(*descriptor, device, bind_group_layout);
+        Self::new(
+            ObjectData::Hyper(hypershape),
+            Transform::default(),
+            device,
+            bind_group_layout,
         )
     }
 
@@ -161,6 +181,15 @@ pub trait DrawObject<'a> {
         diffuse_bind_group: &'a wgpu::BindGroup,
         translation_bind_group: &'a wgpu::BindGroup,
     );
+
+    fn draw_hyper(
+        &mut self,
+        camera_bind_group: &'a wgpu::BindGroup,
+        translation_bind_group: &'a wgpu::BindGroup,
+        hypershape_bind_group: &'a wgpu::BindGroup,
+        slice_bind_group: &'a wgpu::BindGroup,
+    );
+
     fn draw_object(
         &mut self,
         object: &'a Object,
@@ -168,6 +197,7 @@ pub trait DrawObject<'a> {
         material_store: &'a MaterialStore,
         texture_store: &'a TextureStore,
         pipeline_store: &'a PipelineStore,
+        slice_bind_group: &'a wgpu::BindGroup,
     );
 }
 
@@ -190,6 +220,20 @@ where
         self.draw_indexed(0..mesh.num_elements, 0, 0..1);
     }
 
+    fn draw_hyper(
+        &mut self,
+        camera_bind_group: &'b wgpu::BindGroup,
+        translation_bind_group: &'b wgpu::BindGroup,
+        hypershape_bind_group: &'b wgpu::BindGroup,
+        slice_bind_group: &'b wgpu::BindGroup,
+    ) {
+        self.set_bind_group(0, &camera_bind_group, &[]);
+        self.set_bind_group(1, &translation_bind_group, &[]);
+        self.set_bind_group(2, &hypershape_bind_group, &[]);
+        self.set_bind_group(3, &slice_bind_group, &[]);
+        self.draw(0..3, 0..1);
+    }
+
     fn draw_object(
         &mut self,
         object: &'a Object,
@@ -197,29 +241,44 @@ where
         material_store: &'a MaterialStore,
         texture_store: &'a TextureStore,
         pipeline_store: &'a PipelineStore,
+        slice_bind_group: &'a wgpu::BindGroup,
     ) {
-        for data in &object.model.data {
-            let mesh = &data.mesh;
-            let material = material_store.get_material(data.material_id);
-            let diffuse = texture_store.get_texture(material.diffuse_texture_id);
-            self.set_pipeline(deduce_pipeline(
-                data.material_id,
-                material_store,
-                pipeline_store,
-            ));
-            self.draw_mesh(
-                mesh,
+        if let ObjectData::Model(model) = &object.data {
+            for data in &model.data {
+                let mesh = &data.mesh;
+                let material = material_store.get_material(data.material_id);
+                let diffuse = texture_store.get_texture(material.diffuse_texture_id);
+                self.set_pipeline(deduce_pipeline(
+                    data.material_id,
+                    material_store,
+                    pipeline_store,
+                ));
+                self.draw_mesh(
+                    mesh,
+                    camera_bind_group,
+                    diffuse.bind_group.as_ref().unwrap(),
+                    &object.bind_group,
+                );
+            }
+        } else if let ObjectData::Hyper(hyper) = &object.data {
+            self.set_pipeline(&pipeline_store.hyper);
+            self.draw_hyper(
                 camera_bind_group,
-                diffuse.bind_group.as_ref().unwrap(),
                 &object.bind_group,
+                &hyper.bind_group,
+                slice_bind_group,
             );
         }
     }
 }
 
+
+#[allow(dead_code)]
 pub struct ObjectManager {
     pub bind_group_layout: wgpu::BindGroupLayout,
+    pub hyper_bind_group_layout: wgpu::BindGroupLayout,
     actors: Vec<Object>,            // User-defined objects
+    hyper_actors: Vec<Object>,      // User-defined hyper-dimentional objects
     immutable_objects: [Object; 1], // Static objects
 }
 
@@ -243,6 +302,24 @@ impl<'a> ObjectManager {
                     label: None,
                 });
 
+        let hyper_bind_group_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                    label: None,
+                });
+
+        // ToDo Delegate creation of immutable objects to a separate function
         let mut grid = Object::from_model_path(
             &PathBuf::from("models/plane.obj"),
             context,
@@ -251,11 +328,17 @@ impl<'a> ObjectManager {
         )
         .await;
         grid.transform.scale = Vector3::new(100.0, 100.0, 100.0);
-        grid.model.data[0].material_id = 1;
+        if let ObjectData::Model(model) = &mut grid.data {
+            for data in &mut model.data {
+                data.material_id = 1;
+            }
+        }
 
         Self {
-            bind_group_layout: bind_group_layout,
+            bind_group_layout,
+            hyper_bind_group_layout,
             actors: Vec::new(),
+            hyper_actors: Vec::new(),
             immutable_objects: [grid],
         }
     }
@@ -273,21 +356,38 @@ impl<'a> ObjectManager {
         model_path: &PathBuf,
         context: &Context<'_>,
         material_store: &mut MaterialStore,
-    ) {
+    ) -> &mut Object {
         let actor =
             Object::from_model_path(model_path, context, material_store, &self.bind_group_layout)
                 .await;
         self.add_actor(actor);
+        self.actors.last_mut().unwrap()
+    }
+
+    pub fn create_hyper_actor(
+        &mut self,
+        descriptor: &HypershapeDescriptor,
+        context: &Context<'_>,
+    ) -> &mut Object {
+        let actor = Object::from_hyper(descriptor, &context.device, &self.hyper_bind_group_layout);
+        self.hyper_actors.push(actor);
+        self.hyper_actors.last_mut().unwrap()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Object> {
-        self.actors.iter().chain(self.immutable_objects.iter())
+        self.actors.iter().chain(
+            self.hyper_actors
+                .iter()
+                .chain(self.immutable_objects.iter()),
+        )
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Object> {
-        self.actors
-            .iter_mut()
-            .chain(self.immutable_objects.iter_mut())
+        self.actors.iter_mut().chain(
+            self.hyper_actors
+                .iter_mut()
+                .chain(self.immutable_objects.iter_mut()),
+        )
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
