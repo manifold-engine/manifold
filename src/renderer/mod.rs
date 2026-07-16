@@ -2,6 +2,7 @@ pub mod util;
 
 pub mod camera;
 pub mod context;
+pub mod hypershape;
 pub mod material;
 pub mod model;
 pub mod object;

@@ -28,13 +28,13 @@ pub struct Camera {
 impl Camera {
     pub fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
         let eye = CameraEye {
-            position: Point3::new(5.0, 2.0, 5.0),
+            position: Point3::new(6.0, 3.0, 6.0),
             orientation: Quaternion::from_axis_angle(Vector3::unit_y(), Deg(45.0))
                 * Quaternion::from_axis_angle(Vector3::unit_x(), Deg(-15.0)),
             up: Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fov: 45.0,
-            near: 0.1,
+            near: 0.001,
             far: 100.0,
         };
 
@@ -114,6 +114,7 @@ impl CameraEye {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    inv_view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
@@ -121,12 +122,14 @@ impl CameraUniform {
         use SquareMatrix;
         Self {
             view_proj: Matrix4::identity().into(),
+            inv_view_proj: Matrix4::identity().into(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &CameraEye) {
         let proj = camera.build_view_projection_matrix();
         self.view_proj = proj.into();
+        self.inv_view_proj = proj.invert().unwrap().into();
     }
 }
 

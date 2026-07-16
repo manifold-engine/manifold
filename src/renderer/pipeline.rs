@@ -6,28 +6,30 @@ use super::{
 };
 
 fn init_pipeline(
+    name: &str,
     context: &Context,
     bind_group_layouts: &[&wgpu::BindGroupLayout],
+    vertex_buffers: &[wgpu::VertexBufferLayout],
     shader: &wgpu::ShaderModule,
 ) -> wgpu::RenderPipeline {
     let render_pipeline_layout =
         context
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: bind_group_layouts,
+                label: Some(&format!("{} Render Pipeline Layout", name)),
+                bind_group_layouts,
                 push_constant_ranges: &[],
             });
 
     let render_pipeline = context
         .device
         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some(&format!("{} Render Pipeline", name)),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[ModelVertex::desc()],
+                buffers: vertex_buffers,
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -81,9 +83,17 @@ impl PipelineStore {
         shader_store: &ShaderStore,
         bind_group_layouts: &[&wgpu::BindGroupLayout],
     ) -> Self {
-        let grid = init_pipeline(context, bind_group_layouts, &shader_store.grid);
-        let basic = init_pipeline(context, bind_group_layouts, &shader_store.basic);
-        let hyper = init_pipeline(context, bind_group_layouts, &shader_store.hyper);
+        let basic_layouts = &bind_group_layouts[..3];
+        let hyper_layouts = [
+            &bind_group_layouts[..1],
+            &bind_group_layouts[2..],
+        ].concat();
+
+        let default_vertex_bufffers = &[ModelVertex::desc()];
+
+        let grid = init_pipeline("Grid", context, &basic_layouts, default_vertex_bufffers, &shader_store.grid);
+        let basic = init_pipeline("Basic", context, &basic_layouts, default_vertex_bufffers, &shader_store.basic);
+        let hyper = init_pipeline("Hyper", context, &hyper_layouts, &[], &shader_store.hyper);
 
         Self { grid, basic, hyper }
     }
